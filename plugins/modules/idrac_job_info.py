@@ -14,7 +14,7 @@ def main():
     )
 
     result = dict(
-        changed=True,
+        changed=False,
     )
 
     if module.params['job']:
@@ -23,6 +23,7 @@ def main():
         jid = module.params['job_id']
 
     job = module.api.get_job(jid)
+    job['state'] = module.api.get_job_state(job)
 
     result['idrac'] = {
         'job': job,
