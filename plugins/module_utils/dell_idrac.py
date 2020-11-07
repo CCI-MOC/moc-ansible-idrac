@@ -64,7 +64,7 @@ class OperationFailed(IDRACError):
         self.request = exc.request
         self.response = exc.response
 
-        if exc.response.text:
+        if exc.response and exc.response.text:
             data = exc.response.json()
         else:
             data = {}
@@ -79,6 +79,15 @@ class OperationFailed(IDRACError):
                 ))
 
         super().__init__(msg)
+
+
+class CommunicationFailure(OperationFailed):
+    '''Received a communication failed.
+
+    This could be connection refused, connection closed unexpectedly, etc.
+    '''
+
+    pass
 
 
 class JobSchedulingFailed(IDRACError):
@@ -122,11 +131,13 @@ class IDRAC(requests.Session):
 
         LOG.info('fetch %s', url)
 
-        res = super().request(method, url, **kwargs)
         try:
+            res = super().request(method, url, **kwargs)
             res.raise_for_status()
         except requests.exceptions.HTTPError as err:
             raise OperationFailed(err)
+        except requests.exceptions.ConnectionError as err:
+            raise CommunicationFailure(err)
         else:
             if res.headers['Content-type'].split(';')[0] != 'application/json':
                 raise ValueError('unexpected content type {}'.format(
@@ -226,7 +237,7 @@ class IDRAC(requests.Session):
         disks = []
         for controller in self.list_storage_controllers():
             for member in self.list_virtual_disks(
-                    controller, detail=True):
+                    controller, detail=detail):
                 disks.append(member)
 
         return disks
@@ -367,6 +378,24 @@ class IDRAC(requests.Session):
             '#Manager.Reset',
             ResetType='GracefulRestart',
         )
+
+    def wait_for_manager(self, timeout=None):
+        '''Wait for the iDRAC to become available'''
+
+        time_start = time.time()
+
+        while True:
+            try:
+                self.get('/redfish/v1')
+            except OperationFailed as err:
+                LOG.debug('operation failed while waiting: %s', err)
+            else:
+                break
+
+            if timeout and time.time() - time_start() > timeout:
+                raise TimeoutError()
+
+            time.sleep(5)
 
     def reset_system(self, reset_type):
         '''Reset the system.
