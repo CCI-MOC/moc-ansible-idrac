@@ -5,6 +5,7 @@ import ansible_collections.moc.idrac.plugins.module_utils.dell_idrac_module as i
 def main():
     module_args = dict(
         states=dict(type='list'),
+        detail=dict(type='bool', default=False),
     )
 
     module = idrac_module.IDRACModule(
@@ -13,10 +14,14 @@ def main():
     )
 
     result = dict(
-        changed=True,
+        changed=False,
     )
 
-    jobs = module.api.list_jobs(detail=True)
+    if module.params['states'] and not module.params['detail']:
+        module.fail_json(
+            msg='filtering by state requires detail=true')
+
+    jobs = module.api.list_jobs(detail=module.params['detail'])
 
     if module.params['states']:
         states = [getattr(idrac.JOB_STATE, state) for state in module.params['states']]
