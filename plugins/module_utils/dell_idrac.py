@@ -53,14 +53,25 @@ def extract_members(data):
 
 
 class IDRACError(Exception):
+    '''Base class for other exceptions raised by this module'''
     pass
 
 
 class OperationInProgress(IDRACError):
+    '''Attempt to start a job when another one is already scheduled'''
     pass
 
 
 class OperationFailed(IDRACError):
+    '''Raised when an action returns an HTTP error.
+
+    The 'error' key is a list [MessageId, Message] tuples
+    returned by the Redfish API.
+
+    The 'request' and 'response' keys contain, respectively,
+    the request and response objects.
+    '''
+
     def __init__(self, exc):
         self.request = exc.request
         self.response = exc.response
@@ -83,6 +94,7 @@ class OperationFailed(IDRACError):
 
 
 class JobSchedulingFailed(IDRACError):
+    '''Failed to get job ID when scheduling a job'''
     pass
 
 
@@ -92,6 +104,8 @@ class IDRAC(requests.Session):
                  timeout=None):
         super().__init__()
         self.baseurl = 'https://{}'.format(host)
+
+        # set up the requests.Session attributes
         self.auth = (username, password)
         self.headers['Content-type'] = 'application/json'
         self.verify = verify
@@ -99,12 +113,24 @@ class IDRAC(requests.Session):
 
         self._cache = {}
 
-    def request(self, method, url, **kwargs):
-        if '://' in url:
+    def request(self, method, uri, **kwargs):
+        '''Fetch a Redfish resource and return the unserialized response
+
+        Requests the named uri, decodes the JSON response, and
+        returns the resulting dictionary to the caller.
+
+        The uri argument must be an absolute but unqualified URI. It
+        is expected (but not required) to start with '/redfish'.
+        '''
+
+        if '://' in uri:
             raise ValueError(
                 'this class cannot fetch fully qualifed urls')
 
-        url = urljoin(self.baseurl, url)
+        if not uri.startswith('/redfish'):
+            LOG.warning('%s does not look like a redfish uri', uri)
+
+        url = urljoin(self.baseurl, uri)
 
         LOG.info('fetch %s', url)
 
@@ -123,6 +149,8 @@ class IDRAC(requests.Session):
             else:
                 data = res.json()
 
+            # Because the job id for e.g. initilization jobs is
+            # delivered via the Location header
             data.update({
                 '_location': res.headers.get('Location', ''),
             })
@@ -136,6 +164,7 @@ class IDRAC(requests.Session):
         method does not return values from the cache; for that see
         the get_cached method)
         '''
+
         LOG.debug('get %s', uri)
         res = super().get(uri, **kwargs)
         self._cache[uri] = res
@@ -147,14 +176,15 @@ class IDRAC(requests.Session):
         Use this when fetching resources that won't change during the
         course of a session.
         '''
+
         LOG.debug('get %s, possibly from cache', uri)
         return self._cache[uri] if uri in self._cache else self.get(uri)
 
     def _execute_action(self, uri, action, **params):
         '''Execute a named action on a Redfish resource.
 
-        Validates parameters against the allowed values provided
-        by the resources.
+        Validates parameters against the allowed values provided by the
+        '@Redfish.AllowableValues' key on the action descriptor.
         '''
 
         LOG.debug('trying to execute action %s on %s', action, uri)
@@ -178,10 +208,14 @@ class IDRAC(requests.Session):
         return extract_members(data)
 
     def list_virtual_disks(self, uri):
+        '''Return a list of virtual disks on the given controller'''
+
         data = self.get_cached('{}/Volumes'.format(uri))
         return extract_members(data)
 
     def list_all_virtual_disks(self):
+        '''Return a list of virtual disks on all controllers'''
+
         disks = []
         for controller in self.list_storage_controllers():
             for member in self.list_virtual_disks(controller['uri']):
@@ -190,18 +224,27 @@ class IDRAC(requests.Session):
         return disks
 
     def get_virtual_disk_by_name(self, want_name):
+        '''Find a virtual disk for which the Name key matches want_name'''
+
         for disk in self.list_all_virtual_disks():
             detail = self.get(disk['uri'])
             if detail['Name'] == want_name:
                 return detail
 
     def get_virtual_disk_by_id(self, want_id):
+        '''Find a virtual disk for which the Id key matches want_id'''
+
         for disk in self.list_all_virtual_disks():
             detail = self.get(disk['uri'])
             if detail['Id'] == want_id:
                 return detail
 
     def initialize_virtual_disk(self, uri, fast=True):
+        '''Initialize a virtual disk.
+
+        Schedules an initialization job and returns the job id.
+        '''
+
         LOG.debug('initialize disk %s (fast=%s)', uri, fast)
         init_type = 'Fast' if fast else 'Slow'
         disk = self.get(uri)
@@ -230,20 +273,16 @@ class IDRAC(requests.Session):
             return members
 
     def get_job(self, jid):
+        '''Get a job by ID or URI.
+
+        The 'jid' parameter may either by a raw job id (JID_123456) or
+        the uri of a job (/redfish/v1/.../Jobs/JID_123456).
+        '''
+
         if not jid.startswith('/'):
             jid = '{}/{}'.format(RESOURCES.jobs, jid)
 
         return self.get(jid)
-
-    def get_job_type(self, job):
-        if job['JobType'] == 'RAIDConfiguration':
-            job_type = 'staged'
-        elif job['JobType'] == 'RealTimeNoRebootConfiguration':
-            job_type = 'realtime'
-        else:
-            raise ValueError(job['JobType'])
-
-        return job_type
 
     def get_job_state(self, job):
         if 'failed' in job['Message'].lower():
@@ -261,6 +300,15 @@ class IDRAC(requests.Session):
         return self.get(RESOURCES.system)
 
     def wait_for_job_state(self, jid, want_state, timeout=None):
+        '''Wait until a job reaches want_state.
+
+        This calls get_job, so jid may be either a raw job id or
+        a job uri.
+
+        If timeout is not None, raise a TimeoutError if the job
+        does not reach the specified state in timeout seconds.
+        '''
+
         LOG.info('waiting for job state %s', want_state)
         time_start = time.time()
 
@@ -278,6 +326,12 @@ class IDRAC(requests.Session):
             time.sleep(5)
 
     def wait_for_power_state(self, want_state, timeout=None):
+        '''Wait for the system to achieve the named power state.
+
+        If timeout is not None, raise a TimeoutError if the system
+        does not reach the specified state in timeout seconds.
+        '''
+
         LOG.info('waiting for power state %s', want_state)
         time_start = time.time()
 
@@ -298,6 +352,8 @@ class IDRAC(requests.Session):
         return self.get(RESOURCES.manager)
 
     def reset_manager(self):
+        '''Reset the iDRAC'''
+
         return self._execute_action(
             RESOURCES.manager,
             '#Manager.Reset',
@@ -305,6 +361,12 @@ class IDRAC(requests.Session):
         )
 
     def reset_system(self, reset_type):
+        '''Reset the system.
+
+        This calls the '#ComputerSystem.Reset' action on the system
+        resource, which is used to control the system power state.
+        '''
+
         return self._execute_action(
             RESOURCES.system,
             '#ComputerSystem.Reset',
@@ -312,6 +374,16 @@ class IDRAC(requests.Session):
         )
 
     def power_cycle_system(self, timeout=300):
+        '''Power cycle the system.
+
+        This will perform a graceful shutdown of the system followed by
+        a power on.  If the system does not power off within timeout
+        seconds, force the system off and then power it on.
+
+        Raises a TimeoutError if the system fails to reach the required
+        power states within timeout seconds (each).
+        '''
+
         LOG.info('power cycling system')
         system = self.get_system()
 
