@@ -17,7 +17,7 @@ def main():
     )
 
     for disk in module.api.list_all_virtual_disks():
-        detail = module.api.get(disk['uri'])
+        detail = module.api.get(disk)
         if any(
             'id' in spec and detail['Id'] == spec.get('id') or
             'name' in spec and detail['Name'] == spec.get('name')

@@ -40,18 +40,6 @@ class RESOURCES(types.SimpleNamespace):
     jobs = '/redfish/v1/Managers/iDRAC.Embedded.1/Jobs'
 
 
-def extract_members(data):
-    '''Return the list of members from a Redfish container resource'''
-    members = []
-    for member in data['Members']:
-        members.append({
-            'uri': member['@odata.id'],
-            'id': member['@odata.id'].split('/')[-1],
-        })
-
-    return members
-
-
 class IDRACError(Exception):
     '''Base class for other exceptions raised by this module'''
     pass
@@ -180,6 +168,25 @@ class IDRAC(requests.Session):
         LOG.debug('get %s, possibly from cache', uri)
         return self._cache[uri] if uri in self._cache else self.get(uri)
 
+    def _extract_members(self, data,
+                         member_attr='Members',
+                         detail=False,
+                         cache=False):
+        '''Return the list of members from a Redfish container resource'''
+        members = []
+        for member in data[member_attr]:
+            uri = member['@odata.id']
+
+            if detail:
+                if cache:
+                    members.append(self.get_cached(uri))
+                else:
+                    members.append(self.get(uri))
+            else:
+                members.append(uri)
+
+        return members
+
     def _execute_action(self, uri, action, **params):
         '''Execute a named action on a Redfish resource.
 
@@ -203,22 +210,23 @@ class IDRAC(requests.Session):
         return self.post(action['target'],
                          json=params)
 
-    def list_storage_controllers(self):
+    def list_storage_controllers(self, detail=False):
         data = self.get_cached(RESOURCES.storage)
-        return extract_members(data)
+        return self._extract_members(data, detail=detail, cache=True)
 
-    def list_virtual_disks(self, uri):
+    def list_virtual_disks(self, uri, detail=False):
         '''Return a list of virtual disks on the given controller'''
 
         data = self.get_cached('{}/Volumes'.format(uri))
-        return extract_members(data)
+        return self._extract_members(data, detail=detail, cache=True)
 
-    def list_all_virtual_disks(self):
+    def list_all_virtual_disks(self, detail=False):
         '''Return a list of virtual disks on all controllers'''
 
         disks = []
         for controller in self.list_storage_controllers():
-            for member in self.list_virtual_disks(controller['uri']):
+            for member in self.list_virtual_disks(
+                    controller, detail=True):
                 disks.append(member)
 
         return disks
@@ -227,7 +235,7 @@ class IDRAC(requests.Session):
         '''Find a virtual disk for which the Name key matches want_name'''
 
         for disk in self.list_all_virtual_disks():
-            detail = self.get(disk['uri'])
+            detail = self.get(disk)
             if detail['Name'] == want_name:
                 return detail
 
@@ -235,7 +243,7 @@ class IDRAC(requests.Session):
         '''Find a virtual disk for which the Id key matches want_id'''
 
         for disk in self.list_all_virtual_disks():
-            detail = self.get(disk['uri'])
+            detail = self.get(disk)
             if detail['Id'] == want_id:
                 return detail
 
@@ -265,10 +273,10 @@ class IDRAC(requests.Session):
 
     def list_jobs(self, detail=False):
         data = self.get_cached(RESOURCES.jobs)
-        members = extract_members(data)
+        members = self._extract_members(data)
 
         if detail:
-            return [self.get_job(member['uri']) for member in members]
+            return [self.get_job(member) for member in members]
         else:
             return members
 
