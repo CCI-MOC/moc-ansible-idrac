@@ -25,4 +25,10 @@ class IDRACModule(AnsibleModule):
                 self.fail_json(
                     msg='missing required connection option {}'.format(k))
 
-        self.api = idrac.IDRAC.from_module(self)
+        self.api = idrac.IDRAC(
+            self.params['connection']['host'],
+            self.params['connection']['username'],
+            self.params['connection']['password'],
+            verify=self.params['connection'].get('verify'),
+            timeout=self.params['connection'].get('timeout'),
+        )

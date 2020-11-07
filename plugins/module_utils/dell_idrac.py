@@ -41,6 +41,7 @@ class RESOURCES(types.SimpleNamespace):
 
 
 def extract_members(data):
+    '''Return the list of members from a Redfish container resource'''
     members = []
     for member in data['Members']:
         members.append({
@@ -97,18 +98,6 @@ class IDRAC(requests.Session):
         self.timeout = timeout
 
         self._cache = {}
-
-    @classmethod
-    def from_module(cls, module):
-        '''Handy constructor for use by Ansible modules'''
-
-        return cls(
-            module.params['connection']['host'],
-            module.params['connection']['username'],
-            module.params['connection']['password'],
-            verify=module.params['connection'].get('verify'),
-            timeout=module.params['connection'].get('timeout'),
-        )
 
     def request(self, method, url, **kwargs):
         if '://' in url:
