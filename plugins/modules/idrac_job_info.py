@@ -19,16 +19,17 @@ def main():
 
     if module.params['job']:
         jid = module.params['job']['@odata.id']
-    else:
+    elif module.params['job_id']:
         jid = module.params['job_id']
+    else:
+        module.fail_json(
+            msg='you must provide one of job or job_id')
 
     job = module.api.get_job(jid)
-    job['state'] = module.api.get_job_state(job)
 
     result['idrac'] = {
         'job': job,
     }
-
     module.exit_json(**result)
 
 
