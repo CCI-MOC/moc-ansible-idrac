@@ -4,33 +4,32 @@ import ansible_collections.moc.idrac.plugins.module_utils.dell_idrac_module as i
 
 def main():
     module_args = dict(
-        disk=dict(type='list', required=True),
+        disk=dict(type='dict'),
+        disk_id=dict(type='str'),
     )
 
     module = idrac_module.IDRACModule(
         argument_spec=module_args,
-        supports_check_mode=True
+        supports_check_mode=True,
     )
 
     result = dict(
         changed=False,
     )
 
-    for disk in module.api.list_all_virtual_disks():
-        detail = module.api.get(disk)
-        if any(
-            'id' in spec and detail['Id'] == spec.get('id') or
-            'name' in spec and detail['Name'] == spec.get('name')
-            for spec in module.params['disk']
-        ):
-            break
+    if module.params['disk']:
+        did = module.params['disk']['@odata.id']
+    elif module.params['disk_id']:
+        did = module.params['disk_id']
     else:
-        module.fail_json(msg='Failed to find any matching disks')
+        module.fail_json(
+            msg='you must provide one of disk or disk_id')
+
+    disk = module.api.get_virtual_disk(did)
 
     result['idrac'] = {
-        'disk': detail,
+        'disk': disk,
     }
-
     module.exit_json(**result)
 
 
