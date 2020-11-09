@@ -38,6 +38,7 @@ class RESOURCES(types.SimpleNamespace):
     manager = '/redfish/v1/Managers/iDRAC.Embedded.1'
     storage = '/redfish/v1/Systems/System.Embedded.1/Storage'
     jobs = '/redfish/v1/Managers/iDRAC.Embedded.1/Jobs'
+    disks = '/redfish/v1/Systems/System.Embedded.1/Storage/Volumes'
 
 
 class IDRACError(Exception):
@@ -242,6 +243,19 @@ class IDRAC(requests.Session):
 
         return disks
 
+    def get_virtual_disk(self, did):
+        '''Get a disk by ID or URI.
+
+        The 'did' parameter may either by a raw disk id
+        (Disk.Virtual.1:RAID.Integrated.1-1) or the uri of a job
+        (/redfish/v1/.../Volumes/Disk.Virtual.1:RAID.Integrated.1-1).
+        '''
+
+        if not did.startswith('/'):
+            did = '{}/{}'.format(RESOURCES.disks, did)
+
+        return self.get(did)
+
     def get_virtual_disk_by_name(self, want_name):
         '''Find a virtual disk for which the Name key matches want_name'''
 
@@ -386,7 +400,7 @@ class IDRAC(requests.Session):
 
         while True:
             try:
-                self.get('/redfish/v1')
+                self.get('/redfish')
             except OperationFailed as err:
                 LOG.debug('operation failed while waiting: %s', err)
             else:
