@@ -1,8 +1,8 @@
 from ansible.module_utils.basic import AnsibleModule
 import ansible_collections.moc.idrac.plugins.module_utils.dell_idrac as idrac
 
-CONNECTION_REQUIRED_KEYS = (
-    'host', 'username', 'password'
+AUTH_REQUIRED_KEYS = (
+    'username', 'password'
 )
 
 
@@ -12,7 +12,15 @@ class IDRACModule(AnsibleModule):
             argument_spec = {}
 
         argument_spec.update({
-            'connection': {
+            'host': {
+                'type': 'str',
+                'required': True,
+            },
+            'timeout': {
+                'type': 'int',
+                'required': False,
+            },
+            'auth': {
                 'type': 'dict',
                 'required': True,
             }
@@ -20,15 +28,15 @@ class IDRACModule(AnsibleModule):
 
         super().__init__(argument_spec=argument_spec, **kwargs)
 
-        for k in CONNECTION_REQUIRED_KEYS:
-            if k not in self.params.get('connection', {}):
+        for k in AUTH_REQUIRED_KEYS:
+            if k not in self.params.get('auth', {}):
                 self.fail_json(
-                    msg='missing required connection option {}'.format(k))
+                    msg='missing required auth option {}'.format(k))
 
         self.api = idrac.IDRAC(
-            self.params['connection']['host'],
-            self.params['connection']['username'],
-            self.params['connection']['password'],
-            verify=self.params['connection'].get('verify'),
-            timeout=self.params['connection'].get('timeout'),
+            self.params['host'],
+            self.params['auth']['username'],
+            self.params['auth']['password'],
+            verify=self.params['auth'].get('verify'),
+            timeout=self.params.get('timeout'),
         )
